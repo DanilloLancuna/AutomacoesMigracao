@@ -1,0 +1,84 @@
+import PySimpleGUI as sg
+import pandas as pd
+import json
+import os
+
+sg.theme('Default')
+
+layout = [
+    [sg.Text('Planilha com as url:')],
+    [sg.Input(key='-INUrl-'), sg.FileBrowse(file_types=(("Arquivos Excel", "*.xlsx"),))],
+    [sg.Text('Planilha com os imóveis:')],
+    [sg.Input(key='-INImoveis-'), sg.FileBrowse(file_types=(("Arquivos Excel", "*.xlsx"),))],
+    [sg.Text('Pasta para salvar o resultado:')],
+    [sg.Input(key='-SaveFolder-'), sg.FolderBrowse()],
+    [sg.Text('Nome do arquivo:')],
+    [sg.Input(key='-FileName-', default_text='imoveis_gerados.xlsx')],
+    [sg.ProgressBar(100, orientation='h', size=(20, 20), key='-PROGRESSBAR-')],
+    [sg.Text(size=(40, 1), key='-OUTPUT-')],
+    [sg.Button('Gerar planilha'), sg.Button('Sair')]
+]
+
+window = sg.Window('Gerar planilha imóvel', layout)
+
+while True:
+    event, values = window.read()
+    print(event, values)
+
+    if event in (None, 'Sair'):
+        break
+
+    if event == 'Gerar planilha':
+        url_path = values['-INUrl-']
+        imoveis_path = values['-INImoveis-']
+        save_folder = values['-SaveFolder-']
+        file_name = values['-FileName-']
+
+        if not os.path.isfile(url_path) or not os.path.isfile(imoveis_path):
+            sg.popup('Por favor, selecione os arquivos corretos.', title='Erro')
+            continue
+
+        if not os.path.isdir(save_folder):
+            sg.popup('Por favor, selecione um diretório válido para salvar o resultado.', title='Erro')
+            continue
+
+        dataUrl = pd.read_excel(url_path, index_col=0)
+        dataImovel = pd.read_excel(imoveis_path)
+
+        arquivoUrls = pd.DataFrame(dataUrl, columns=['id_arquivo', 'url']).to_dict('split')['data']
+        arquivoUrlsImoveis = pd.DataFrame(dataImovel, columns=['property_id', 'fotos'])
+
+        linhas = []
+        progress_bar = window['-PROGRESSBAR-']
+        progress_max = len(arquivoUrlsImoveis)
+        progress_value = 0
+
+        for linhaImoveis in arquivoUrlsImoveis.to_dict('split')['data']:
+            try:
+                fotosLinhaImoveis = json.loads(linhaImoveis[1])
+            except:
+                fotosLinhaImoveis = ""
+
+            idImovelLinhaImoveis = linhaImoveis[0]
+
+            for fotoIndividual in fotosLinhaImoveis:
+                urlFotoIndividual = dataUrl.loc[fotoIndividual['id'], 'url']
+
+                linhas.append({
+                    'IDFOTO': fotoIndividual['id'],
+                    'IDIMOVEL': linhaImoveis[0],
+                    'URL': urlFotoIndividual
+                })
+
+            progress_value += 1
+            progress_bar.update_bar(progress_value, max=progress_max)
+
+        progress_bar.update_bar(progress_max, max=progress_max)  # Atualiza a barra de progresso para o valor máximo
+
+        excel = pd.DataFrame(linhas)
+        save_file_path = os.path.join(save_folder, file_name)
+        excel.to_excel(save_file_path)
+
+        sg.popup(f'O arquivo foi salvo em:\n{save_file_path}', title='Sucesso')
+
+window.close()
