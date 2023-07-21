@@ -1,0 +1,94 @@
+import os
+import pandas as pd
+import requests
+from PIL import Image
+from io import BytesIO
+import boto3
+
+# Credenciais do S3
+aws_access_key_id = ""
+aws_secret_access_key = ""
+
+# Pede para o usuário informar o caminho do arquivo xlsx
+caminho_arquivo = r"D:\Universal\Alegrete\teste.xlsx"
+
+# Pede para o usuário escolher o destino das fotos
+escolha_destino = input("Deseja salvar as imagens localmente (L) ou no servidor S3 da Amazon (S)? ").strip().lower()
+
+# Definir caminho_fotos como vazio para o caso de opção inválida
+caminho_fotos = ""
+
+if escolha_destino == 'l':
+    caminho_fotos = r"D:\Universal\Alegrete\Baixar_Imagens"
+elif escolha_destino == 's':
+    # Cria um cliente do boto3 para o serviço S3
+    s3 = boto3.client('s3', aws_access_key_id=aws_access_key_id, aws_secret_access_key=aws_secret_access_key)
+
+    # Nome do bucket S3 onde as imagens serão enviadas
+    nome_bucket_s3 = r"imoview.com.br"  # Defina aqui apenas o nome do bucket
+    caminho_fotos = r"alegrete/Fotos"  # Defina aqui o caminho no bucket onde deseja salvar as imagens
+
+else:
+    print("Opção inválida. Saindo do programa.")
+    exit()
+
+# Restante do código...
+
+# Função para fazer o download de uma imagem a partir de uma URL e converter para JPG, se necessário
+def download_image(url, filename):
+    response = requests.get(url)
+    content_type = response.headers['Content-Type']
+
+    if 'image/webp' in content_type:
+        image = Image.open(BytesIO(response.content))
+        image = image.convert('RGB')
+        filename = os.path.splitext(filename)[0] + '.jpg'
+        image.save(filename, 'JPEG')
+    else:
+        with open(filename, 'wb') as f:
+            f.write(response.content)
+
+# Lê a planilha Excel
+df = pd.read_excel(caminho_arquivo)
+
+# Dicionário para armazenar a numeração para cada código auxiliar
+numeros_por_codigo = {}
+
+# Itera pelas linhas da planilha e faz o download das imagens
+for i, row in df.iterrows():
+    # Cria a pasta com o código auxiliar, se ela não existir
+    codigo_auxiliar = row['codigoauxiliar']
+    pasta = os.path.join(caminho_fotos, str(codigo_auxiliar))
+    if not os.path.exists(pasta):
+        os.makedirs(pasta)
+
+    # Baixa a imagem e salva na pasta criada
+    url = row['url']
+    ordem = row['ordem']
+    extensao = os.path.splitext(url)[-1]
+
+    if not extensao:
+        extensao = '.jpg'
+
+    if pd.isnull(ordem):
+        # Verifica se já existe uma numeração para o código auxiliar
+        if codigo_auxiliar not in numeros_por_codigo:
+            numeros_por_codigo[codigo_auxiliar] = 0
+        else:
+            numeros_por_codigo[codigo_auxiliar] += 1
+
+        ordem = numeros_por_codigo[codigo_auxiliar]
+
+    nome_arquivo = str(codigo_auxiliar) + '_' + str(ordem) + extensao
+    caminho_arquivo = os.path.join(pasta, nome_arquivo)
+
+    if escolha_destino == 'l':
+        download_image(url, caminho_arquivo)
+    else:
+        # Upload para o S3
+        s3.upload_file(caminho_arquivo, nome_bucket_s3, nome_arquivo)
+
+    # Exibe o andamento do processo
+    print(f'{i + 1}/{len(df)} - Arquivo salvo em {caminho_arquivo}')
+
+print('Processo concluído!')
