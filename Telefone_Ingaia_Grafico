@@ -1,0 +1,196 @@
+import pandas as pd
+import tkinter as tk
+from tkinter import filedialog, messagebox, Checkbutton, IntVar
+
+
+# Variável global para armazenar os scripts gerados
+scripts_sql = []
+
+
+# Função para gerar os scripts de e-mails
+def gerar_scripts_emails(planilha, cabecalho_cliente, cabecalho_emails):
+    scripts_emails = []
+
+    try:
+        # Ler a coluna de IDs e de e-mails da planilha
+        id_coluna = planilha[cabecalho_cliente]
+        emails_coluna = planilha[cabecalho_emails]
+
+        # Iterar pelos IDs e e-mails
+        for cliente_id, emails in zip(id_coluna, emails_coluna):
+            if pd.notna(emails):  # Ignorar células vazias
+                emails_lista = emails.split(',')  # Separar e-mails
+                for email in emails_lista:
+                    email_limpado = email.strip()  # Remover espaços
+                    if email_limpado:
+                        script_email = f"insert into Pessoas_emails(CodigoPessoaemail, CodigoTipoemail, email) select (select CodigoPessoa from Pessoas_Auxiliares where CodigoAuxiliarPessoa = '{cliente_id}'), 2, '{email_limpado}'"
+                        scripts_emails.append(script_email)
+
+    except Exception as e:
+        messagebox.showerror("Erro na geração de scripts de e-mail", str(e))
+
+    return scripts_emails
+
+
+# Função para gerar os scripts de telefones
+def gerar_scripts_telefones(planilha, cabecalho_cliente, cabecalho_telefones):
+    scripts_telefones = []
+
+    try:
+        # Função para limpar o telefone e manter apenas números
+        def limpar_telefone(telefone):
+            for palavra in palavras_ignoradas:
+                telefone = telefone.replace(palavra, '')
+            return ''.join(filter(str.isdigit, telefone))  # Manter apenas os dígitos
+
+        # Palavras a serem ignoradas
+        palavras_ignoradas = ['Celular: ', 'Tel. Comercial: ', 'Tel. Residencial: ', 'Rádio']
+
+        # Inicializar um dicionário para armazenar os telefones únicos por cliente
+        telefones_por_cliente = {}
+
+        # Iterar pelas linhas da planilha
+        for index, row in planilha.iterrows():
+            cliente_id = row[cabecalho_cliente]
+            telefones = str(row[cabecalho_telefones])  # Converter o valor para string
+            if telefones.strip() and isinstance(telefones, str):
+                telefones_list = telefones.split(':')
+
+                for telefone in telefones_list:
+                    telefone_limpado = limpar_telefone(telefone)
+                    if telefone_limpado:
+                        if cliente_id in telefones_por_cliente:
+                            telefones_por_cliente[cliente_id].append(telefone_limpado)
+                        else:
+                            telefones_por_cliente[cliente_id] = [telefone_limpado]
+
+        for cliente_id, telefones in telefones_por_cliente.items():
+            for telefone in telefones:
+                telefone_script = f"insert into Pessoas_Telefones(CodigoPessoaTelefone, CodigoTipoTelefone, NumeroTelefone) select (select CodigoPessoa from Pessoas_Auxiliares where CodigoAuxiliarPessoa = '{cliente_id}'), 2, '{telefone}' "
+                scripts_telefones.append(telefone_script)
+
+    except Exception as e:
+        messagebox.showerror("Erro na geração de scripts de telefone", str(e))
+
+    return scripts_telefones
+
+
+# Função para gerar os scripts SQL
+def gerar_scripts():
+    global scripts_sql
+    scripts_sql = []  # Limpar os scripts gerados
+
+    caminho_planilha = entrada_caminho.get()
+    cabecalho_cliente = entrada_cabecalho_cliente.get()
+    cabecalho_telefones = entrada_cabecalho_telefones.get()
+    cabecalho_emails = entrada_cabecalho_emails.get()
+
+    usar_telefone = usar_telefone_var.get()
+    usar_email = usar_email_var.get()
+
+    if usar_telefone and usar_email:
+        # Ambas as opções selecionadas, mostrar mensagem de erro
+        messagebox.showerror("Erro", "Selecione apenas uma opção (E-mail ou Telefone).")
+        return
+
+    try:
+        # Carregar a planilha para um DataFrame
+        planilha = pd.read_excel(caminho_planilha)
+
+        if usar_telefone and cabecalho_telefones not in planilha.columns:
+            messagebox.showerror("Erro", f"Cabeçalho {cabecalho_telefones} não encontrado na planilha.")
+            return
+
+        if usar_email and cabecalho_emails not in planilha.columns:
+            messagebox.showerror("Erro", f"Cabeçalho {cabecalho_emails} não encontrado na planilha.")
+            return
+
+        if usar_email:
+            scripts_emails = gerar_scripts_emails(planilha, cabecalho_cliente, cabecalho_emails)
+            scripts_sql.extend(scripts_emails)
+
+        if usar_telefone:
+            scripts_telefones = gerar_scripts_telefones(planilha, cabecalho_cliente, cabecalho_telefones)
+            scripts_sql.extend(scripts_telefones)
+
+    except Exception as e:
+        messagebox.showerror("Erro", str(e))
+
+    # Desmarcar a opção não selecionada
+    if usar_telefone:
+        usar_email_var.set(0)
+    else:
+        usar_telefone_var.set(0)
+
+
+# Função para salvar os scripts gerados
+def salvar_scripts():
+    if scripts_sql:
+        caminho_script = filedialog.asksaveasfilename(defaultextension=".sql", filetypes=[("SQL Files", "*.sql")])
+        if caminho_script:
+            with open(caminho_script, 'w') as file:
+                for script in scripts_sql:
+                    file.write(script + '\nGO\n')
+
+
+# Função para selecionar a planilha
+def selecionar_planilha():
+    caminho = filedialog.askopenfilename(filetypes=[("Excel Files", "*.xlsx")])
+    entrada_caminho.delete(0, tk.END)
+    entrada_caminho.insert(0, caminho)
+
+
+# Criação da interface gráfica
+janela = tk.Tk()
+janela.title("Gerador de Scripts SQL")
+
+# Labels e entradas de texto
+label_caminho = tk.Label(janela, text="Caminho da Planilha:")
+entrada_caminho = tk.Entry(janela, width=40)
+botao_selecionar = tk.Button(janela, text="...", command=selecionar_planilha)
+
+label_cabecalho_cliente = tk.Label(janela, text="Cabeçalho do ID do Cliente:")
+entrada_cabecalho_cliente = tk.Entry(janela, width=30)
+entrada_cabecalho_cliente.insert(0, "id cliente")  # Defina o valor padrão desejado
+
+label_cabecalho_telefones = tk.Label(janela, text="Cabeçalho dos Telefones:")
+entrada_cabecalho_telefones = tk.Entry(janela, width=30)
+entrada_cabecalho_telefones.insert(0, "telefones")  # Defina o valor padrão desejado
+
+label_cabecalho_emails = tk.Label(janela, text="Cabeçalho dos Emails:")
+entrada_cabecalho_emails = tk.Entry(janela, width=30)
+entrada_cabecalho_emails.insert(0, "emails")  # Defina o valor padrão desejado
+
+botao_gerar = tk.Button(janela, text="Gerar Scripts SQL", command=gerar_scripts)
+botao_salvar = tk.Button(janela, text="Salvar Scripts", command=salvar_scripts)
+
+# Criação dos checkboxes
+usar_telefone_var = IntVar()
+usar_telefone_checkbox = Checkbutton(janela, text="Usar para Telefone", variable=usar_telefone_var)
+
+usar_email_var = IntVar()
+usar_email_checkbox = Checkbutton(janela, text="Usar para Email", variable=usar_email_var)
+
+# Posicionamento dos checkboxes
+usar_telefone_checkbox.pack()
+usar_email_checkbox.pack()
+
+# Posicionar elementos na janela
+label_caminho.pack()
+entrada_caminho.pack()
+botao_selecionar.pack()
+
+label_cabecalho_cliente.pack()
+entrada_cabecalho_cliente.pack()
+
+label_cabecalho_telefones.pack()
+entrada_cabecalho_telefones.pack()
+
+label_cabecalho_emails.pack()
+entrada_cabecalho_emails.pack()
+
+botao_gerar.pack()
+botao_salvar.pack()
+
+# Iniciar a interface gráfica
+janela.mainloop()
